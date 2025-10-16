@@ -80,7 +80,7 @@ class WC_Stripe_Intent_Controller {
 	 * @throws WC_Stripe_Exception An exception if there is no order ID or the order does not exist.
 	 * @return WC_Order
 	 */
-	protected function get_order_from_request() {
+	private function get_order_from_request() {
 		if ( ! isset( $_GET['nonce'] ) || ! wp_verify_nonce( sanitize_key( $_GET['nonce'] ), 'wc_stripe_confirm_pi' ) ) {
 			throw new WC_Stripe_Exception( 'missing-nonce', __( 'CSRF verification failed.', 'woocommerce-gateway-stripe' ) );
 		}
@@ -114,7 +114,27 @@ class WC_Stripe_Intent_Controller {
 
 		try {
 			$order = $this->get_order_from_request();
+
+			// Validate order status.
+			if ( ! $order->has_status(
+				apply_filters(
+					'wc_stripe_allowed_payment_processing_statuses',
+					[ OrderStatus::PENDING, OrderStatus::FAILED ],
+					$order
+				)
+			) ) {
+				throw new WC_Stripe_Exception( 'invalid_order_status', __( "We're not able to process this payment. Please try again later.", 'woocommerce-gateway-stripe' ) );
+			}
+
+			// Validate the intent being verified.
+			$order_intent_id = WC_Stripe_Order_Helper::get_instance()->get_stripe_intent( $order );
+			if ( ! $order_intent_id || ! isset( $_GET['intent_id'] ) || $order_intent_id !== $_GET['intent_id'] ) {
+				throw new WC_Stripe_Exception( 'invalid_intent', __( "We're not able to process this payment. Please try again later.", 'woocommerce-gateway-stripe' ) );
+			}
 		} catch ( WC_Stripe_Exception $e ) {
+			// Unset the order.
+			$order = null;
+
 			/* translators: Error message text */
 			$message = sprintf( __( 'Payment verification error: %s', 'woocommerce-gateway-stripe' ), $e->getLocalizedMessage() );
 			wc_add_notice( esc_html( $message ), 'error' );
@@ -464,8 +484,10 @@ class WC_Stripe_Intent_Controller {
 			];
 		}
 
+		$order_helper = WC_Stripe_Order_Helper::get_instance();
+
 		$selected_payment_type = '' !== $selected_upe_payment_type && is_string( $selected_upe_payment_type ) ? $selected_upe_payment_type : null;
-		WC_Stripe_Helper::validate_intent_for_order( $order, $intent_id, $selected_payment_type );
+		$order_helper->validate_intent_for_order( $order, $intent_id, $selected_payment_type );
 
 		$gateway  = $this->get_upe_gateway();
 		$amount   = $order->get_total();
@@ -557,7 +579,7 @@ class WC_Stripe_Intent_Controller {
 				$order->update_status( OrderStatus::PENDING, __( 'Awaiting payment.', 'woocommerce-gateway-stripe' ) );
 			}
 			$order->save();
-			WC_Stripe_Helper::add_payment_intent_to_order( $intent_id, $order );
+			$order_helper->add_payment_intent_to_order( $intent_id, $order );
 		}
 
 		return [
@@ -650,7 +672,9 @@ class WC_Stripe_Intent_Controller {
 	 * @throws WC_Stripe_Exception
 	 */
 	public function update_order_status_ajax() {
-		$order = false;
+		$order_helper = WC_Stripe_Order_Helper::get_instance();
+		$order        = false;
+
 		try {
 			$is_nonce_valid = check_ajax_referer( 'wc_stripe_update_order_status_nonce', false, false );
 			if ( ! $is_nonce_valid ) {
@@ -663,7 +687,7 @@ class WC_Stripe_Intent_Controller {
 				throw new WC_Stripe_Exception( 'order_not_found', __( "We're not able to process this payment. Please try again later.", 'woocommerce-gateway-stripe' ) );
 			}
 
-			$intent_id          = WC_Stripe_Helper::get_intent_id_from_order( $order );
+			$intent_id          = $order_helper->get_intent_id_from_order( $order );
 			$intent_id_received = isset( $_POST['intent_id'] ) ? wc_clean( wp_unslash( $_POST['intent_id'] ) ) : null;
 			if ( empty( $intent_id_received ) || $intent_id_received !== $intent_id ) {
 				$note = sprintf(
@@ -691,7 +715,7 @@ class WC_Stripe_Intent_Controller {
 			/* translators: error message */
 			if ( $order ) {
 				// Remove the awaiting confirmation order meta, don't save the order since it'll be saved in the next `update_status()` call.
-				WC_Stripe_Helper::remove_payment_awaiting_action( $order, false );
+				$order_helper->remove_payment_awaiting_action( $order, false );
 				$order->update_status( OrderStatus::FAILED );
 			}
 

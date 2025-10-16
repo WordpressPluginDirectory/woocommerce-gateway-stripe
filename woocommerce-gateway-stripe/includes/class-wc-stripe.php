@@ -125,8 +125,10 @@ class WC_Stripe {
 		require_once WC_STRIPE_PLUGIN_PATH . '/includes/class-wc-stripe-exception.php';
 		require_once WC_STRIPE_PLUGIN_PATH . '/includes/class-wc-stripe-logger.php';
 		require_once WC_STRIPE_PLUGIN_PATH . '/includes/class-wc-stripe-helper.php';
+		include_once WC_STRIPE_PLUGIN_PATH . '/includes/class-wc-stripe-order-helper.php';
 		require_once WC_STRIPE_PLUGIN_PATH . '/includes/class-wc-stripe-database-cache.php';
 		require_once WC_STRIPE_PLUGIN_PATH . '/includes/class-wc-stripe-payment-method-configurations.php';
+		require_once WC_STRIPE_PLUGIN_PATH . '/includes/class-wc-stripe-database-cache-prefetch.php';
 		include_once WC_STRIPE_PLUGIN_PATH . '/includes/class-wc-stripe-api.php';
 		include_once WC_STRIPE_PLUGIN_PATH . '/includes/class-wc-stripe-mode.php';
 		require_once WC_STRIPE_PLUGIN_PATH . '/includes/compat/class-wc-stripe-subscriptions-helper.php';
@@ -150,6 +152,7 @@ class WC_Stripe {
 		require_once WC_STRIPE_PLUGIN_PATH . '/includes/payment-tokens/class-wc-stripe-bacs-payment-token.php';
 		require_once WC_STRIPE_PLUGIN_PATH . '/includes/payment-tokens/class-wc-stripe-becs-debit-payment-token.php';
 		require_once WC_STRIPE_PLUGIN_PATH . '/includes/payment-tokens/class-wc-stripe-amazon-pay-payment-token.php';
+		require_once WC_STRIPE_PLUGIN_PATH . '/includes/payment-tokens/class-wc-stripe-klarna-payment-token.php';
 		require_once WC_STRIPE_PLUGIN_PATH . '/includes/class-wc-stripe-apple-pay-registration.php';
 		require_once WC_STRIPE_PLUGIN_PATH . '/includes/class-wc-stripe-status.php';
 		require_once WC_STRIPE_PLUGIN_PATH . '/includes/class-wc-gateway-stripe.php';
@@ -182,6 +185,7 @@ class WC_Stripe {
 		require_once WC_STRIPE_PLUGIN_PATH . '/includes/payment-methods/class-wc-stripe-upe-payment-method-wechat-pay.php';
 		require_once WC_STRIPE_PLUGIN_PATH . '/includes/payment-methods/class-wc-stripe-upe-payment-method-acss.php';
 		require_once WC_STRIPE_PLUGIN_PATH . '/includes/payment-methods/class-wc-stripe-upe-payment-method-amazon-pay.php';
+		require_once WC_STRIPE_PLUGIN_PATH . '/includes/payment-methods/class-wc-stripe-upe-payment-method-oc.php';
 		require_once WC_STRIPE_PLUGIN_PATH . '/includes/payment-methods/class-wc-gateway-stripe-bancontact.php';
 		require_once WC_STRIPE_PLUGIN_PATH . '/includes/payment-methods/class-wc-gateway-stripe-sofort.php';
 		require_once WC_STRIPE_PLUGIN_PATH . '/includes/payment-methods/class-wc-gateway-stripe-giropay.php';
@@ -208,12 +212,14 @@ class WC_Stripe {
 		require_once WC_STRIPE_PLUGIN_PATH . '/includes/admin/class-wc-stripe-inbox-notes.php';
 		require_once WC_STRIPE_PLUGIN_PATH . '/includes/admin/class-wc-stripe-upe-compatibility-controller.php';
 		require_once WC_STRIPE_PLUGIN_PATH . '/includes/migrations/class-allowed-payment-request-button-types-update.php';
+		require_once WC_STRIPE_PLUGIN_PATH . '/includes/migrations/class-sepa-tokens-for-other-methods-settings-update.php';
 		require_once WC_STRIPE_PLUGIN_PATH . '/includes/migrations/class-migrate-payment-request-data-to-express-checkout-data.php';
 		require_once WC_STRIPE_PLUGIN_PATH . '/includes/class-wc-stripe-account.php';
 
 		new Allowed_Payment_Request_Button_Types_Update();
 		// TODO: Temporary disabling the migration as it has a conflict with the new UPE checkout.
 		// new Migrate_Payment_Request_Data_To_Express_Checkout_Data();
+		new Sepa_Tokens_For_Other_Methods_Settings_Update();
 
 		$this->api                           = new WC_Stripe_Connect_API();
 		$this->connect                       = new WC_Stripe_Connect( $this->api );
@@ -285,7 +291,13 @@ class WC_Stripe {
 		// Check for payment methods that should be toggled, e.g. unreleased,
 		// BNPLs when official plugins are active,
 		// cards when the Optimized Checkout is enabled, etc.
-		add_action( 'init', [ $this, 'maybe_toggle_payment_methods' ] );
+		add_action( 'wc_payment_gateways_initialized', [ $this, 'maybe_toggle_payment_methods' ] );
+
+		add_action( WC_Stripe_Database_Cache::ASYNC_CLEANUP_ACTION, [ WC_Stripe_Database_Cache::class, 'delete_all_stale_entries_async' ], 10, 2 );
+		add_action( 'action_scheduler_run_recurring_actions_schedule_hook', [ WC_Stripe_Database_Cache::class, 'maybe_schedule_daily_async_cleanup' ], 10, 0 );
+
+		// Handle the async cache prefetch action.
+		add_action( WC_Stripe_Database_Cache_Prefetch::ASYNC_PREFETCH_ACTION, [ WC_Stripe_Database_Cache_Prefetch::get_instance(), 'handle_prefetch_action' ], 10, 1 );
 	}
 
 	/**
@@ -357,6 +369,18 @@ class WC_Stripe {
 			// TODO: Remove this call when all the merchants have moved to the new checkout experience.
 			// We are calling this function here to make sure that the Stripe methods are added to the `woocommerce_gateway_order` option.
 			WC_Stripe_Helper::add_stripe_methods_in_woocommerce_gateway_order();
+
+			// Try to schedule the daily async cleanup of the Stripe database cache.
+			WC_Stripe_Database_Cache::maybe_schedule_daily_async_cleanup();
+
+			// If we have previously disabled settings synchronization, remove the flag after the upgrade,
+			// just to make sure we are still ineligible for settings synchronization.
+			$stripe_settings = WC_Stripe_Helper::get_stripe_settings();
+			if ( isset( $stripe_settings['pmc_enabled'] ) && 'no' === $stripe_settings['pmc_enabled'] ) {
+				unset( $stripe_settings['pmc_enabled'] );
+				WC_Stripe_Helper::update_main_stripe_settings( $stripe_settings );
+				WC_Stripe_Logger::warning( 'Settings synchronization eligibility will be re-checked after upgrade' );
+			}
 		}
 	}
 
@@ -865,25 +889,25 @@ class WC_Stripe {
 
 	/**
 	 * Toggle payment methods that should be enabled/disabled, e.g. unreleased,
-	 * BNPLs when other official plugins are active,
-	 * cards when the Optimized Checkout is enabled, etc.
+	 * BNPLs when other official plugins are active, etc.
+	 *
+	 * @param WC_Payment_Gateways $gateways The WooCommerce Payment Gateways instance.
 	 *
 	 * @return void
 	 */
-	public function maybe_toggle_payment_methods() {
+	public function maybe_toggle_payment_methods( WC_Payment_Gateways $gateways ) {
 		$gateway = $this->get_main_stripe_gateway();
 		if ( ! is_a( $gateway, 'WC_Stripe_UPE_Payment_Gateway' ) ) {
 			return;
 		}
 
 		$payment_method_ids_to_disable = [];
-		$payment_method_ids_to_enable  = [];
 		$enabled_payment_methods       = $gateway->get_upe_enabled_payment_method_ids();
 
 		// Check for BNPLs that should be deactivated.
 		$payment_method_ids_to_disable = array_merge(
 			$payment_method_ids_to_disable,
-			$this->maybe_deactivate_bnpls( $enabled_payment_methods )
+			$this->maybe_deactivate_bnpls( $gateways->payment_gateways, $enabled_payment_methods )
 		);
 
 		// Check if Amazon Pay should be deactivated.
@@ -892,21 +916,9 @@ class WC_Stripe {
 			$this->maybe_deactivate_amazon_pay( $enabled_payment_methods )
 		);
 
-		// Check if cards should be activated.
-		// TODO: Remove this once card is not a requirement for the Optimized Checkout.
-		if ( $gateway->is_oc_enabled()
-			&& ! in_array( WC_Stripe_Payment_Methods::CARD, $enabled_payment_methods, true ) ) {
-			$payment_method_ids_to_enable[] = WC_Stripe_Payment_Methods::CARD;
-		}
-
-		if ( [] === $payment_method_ids_to_disable && [] === $payment_method_ids_to_enable ) {
+		if ( [] === $payment_method_ids_to_disable ) {
 			return;
 		}
-
-		$enabled_payment_methods = array_merge(
-			$enabled_payment_methods,
-			$payment_method_ids_to_enable
-		);
 
 		$gateway->update_enabled_payment_methods(
 			array_diff( $enabled_payment_methods, $payment_method_ids_to_disable )
@@ -916,12 +928,20 @@ class WC_Stripe {
 	/**
 	 * Deactivate Affirm or Klarna payment methods if other official plugins are active.
 	 *
+	 * @param array $available_payment_gateways The available payment gateways.
 	 * @param array $enabled_payment_methods The enabled payment methods.
 	 * @return array The payment method IDs to disable.
 	 */
-	private function maybe_deactivate_bnpls( $enabled_payment_methods ) {
-		$has_affirm_plugin_active = WC_Stripe_Helper::has_gateway_plugin_active( WC_Stripe_Helper::OFFICIAL_PLUGIN_ID_AFFIRM );
-		$has_klarna_plugin_active = WC_Stripe_Helper::has_gateway_plugin_active( WC_Stripe_Helper::OFFICIAL_PLUGIN_ID_KLARNA );
+	private function maybe_deactivate_bnpls( $available_payment_gateways, $enabled_payment_methods ) {
+		$has_affirm_plugin_active = WC_Stripe_Helper::has_gateway_plugin_active(
+			WC_Stripe_Helper::OFFICIAL_PLUGIN_ID_AFFIRM,
+			$available_payment_gateways
+		);
+		$has_klarna_plugin_active = WC_Stripe_Helper::has_gateway_plugin_active(
+			WC_Stripe_Helper::OFFICIAL_PLUGIN_ID_KLARNA,
+			$available_payment_gateways
+		);
+
 		if ( ! $has_affirm_plugin_active && ! $has_klarna_plugin_active ) {
 			return [];
 		}

@@ -2,9 +2,9 @@
 Contributors: woocommerce, automattic, royho, akeda, mattyza, bor0, woothemes
 Tags: credit card, stripe, payments, woocommerce, woo
 Requires at least: 6.6
-Tested up to: 6.8.2
+Tested up to: 6.8.3
 Requires PHP: 7.4
-Stable tag: 9.8.0
+Stable tag: 10.0.1
 License: GPLv3
 License URI: https://www.gnu.org/licenses/gpl-3.0.html
 Attributions: thorsten-stripe
@@ -110,60 +110,53 @@ If you get stuck, you can ask for help in the [Plugin Forum](https://wordpress.o
 
 == Changelog ==
 
-= 9.8.1 - 2025-08-15 =
+= 10.0.1 - 2025-10-15 =
+* Fix - Remove persistent reconnection notices
 
-**Important Fixes and Updates**
-
-* Fix - Remove connection type requirement from PMC sync migration attempt
-* Fix - Relax customer validation that was preventing payments from the pay for order page
-* Fix - Prevent the PMC migration to run when the plugin is not connected to Stripe
-* Fix - Fixes a fatal error in the OC inbox note when the new checkout is disabled
-
-= 9.8.0 - 2025-08-11 =
+= 10.0.0 - 2025-10-14 =
 
 **New Features**
 
-* Optimized Checkout is now available to all users via a configuration setting.
-  - Optimized Checkout maximizes conversion by displaying the most relevant payment methods for each customer.
-* After several consecutive 401 (Unauthorized) responses, we will now temporarily stop making Stripe API calls to prevent further authentication failures. API calls will resume automatically after a cooldown period.
-* When we detect the official Affirm or Klarna plugin is active, we will deactivate the related Stripe payment method.
+* Add - Allow the purchase of free trials using the Express Payment methods when the product does not require shipping
+* Update - Splits the "Enable SEPA for other methods" setting into two separate settings for Bancontact and iDEAL
 
 **Important Fixes and Updates**
 
-* Fix - Reduce number of calls to Stripe payment_methods API
-* Fix - Fixes issues related to booking multiple slots with express checkout payment methods enabled
-* Fix - 3DS authentication modal not shown when using Google Pay
-* Fix - Remove validation error check from classic checkout before payment method creation
-* Fix - Only clear customer cache when an action has been performed
-* Fix - Free trial subscription orders with payment methods that require redirection (eg: iDeal, Bancontact)
-* Add - Adds a new bulk action option to the subscriptions listing screen to check for detached payment methods
-* Update - Improve Stripe API connector logging to include request/response context
+* Update - Removing the `wc_stripe_is_upe_checkout_enabled` filter, as Legacy Checkout is no longer supported
+* Update - Disable Payment Request Buttons and ensure Express Checkout is used when express checkout buttons are enabled
+* Add - Introduce wc_stripe_preselect_payment_method_configuration filter for manual payment method configuration selection
+* Update - Removes frontend code related to Payment Request Buttons in the checkout page
+* Fix - Ensure Klarna payment tokens can be deleted and handled correctly
+* Fix - Prevent fatal error when third-party plugins check for non-existent methods in payment method classes
+* Add - Implement cache prefetch for payment method configuration
+* Update - Shows the Stripe account connection modal in settings when the merchant did not connect via OAuth along with a new notice
+* Update - The usage of SEPA Direct Debit as a saved payment method for iDEAL and Bancontact is now disabled by default
+* Update - Reduce settings Javascript file size by using smaller image
 
 **Other Fixes**
 
-* Fix - Require credit cards to be enabled before Apple Pay and Google Pay can be enabled in PMC
-* Fix - Force the card payment method to be enabled when the Optimized Checkout is enabled in the merchant's Payment Method Configuration
-* Fix - Handle missing customer when calling payment_methods API
-* Add - Adds the current setting value for the Optimized Checkout to the Stripe System Status Report data
-* Add - A new pill to the payment methods page to indicate the credit card requirement when the Optimized Checkout feature is enabled
-* Fix - Update the Optimized Checkout promotional inbox note to link to the relevant section in the Stripe settings page
-* Add - Introduces a new banner to promote the Optimized Checkout feature in the Stripe settings page for versions 9.8 and above
-* Add - Introduces a new inbox note to promote the Optimized Checkout feature on version 9.8 and later
-* Tweak - Use wp_ajax prefix for its built-in security for Add Payment Method action
-* Update - Removes the ability to change the title for the Optimized Checkout payment element, as it is now set to "Stripe" by default
-* Fix - Add `get_icon_url()` to Payment Method base class
+* Fix - Minor fixes and code improvements for the saved payment methods comparison logic
+* Update - Changes the documentation page URL for the Optimized Checkout feature to https://woocommerce.com/document/stripe/admin-experience/optimized-checkout-suite/
+* Update - Changes the background color and spacing for the Woo logo shown in the account modal
 
 **Internal Changes and Upcoming Features**
 
-* Add - Tracks the toggle of the Optimized Checkout feature in the promotional banner
-* Dev - Use product type constants that were added in WooCommerce 9.7
-* Dev - Removes the inclusion of the deprecated WC_Stripe_Order class
-* Tweak - Update checkout error message for invalid API key to be more generic and user-friendly
-* Update - Copy for the Optimized Checkout settings and notices
-* Tweak - Disable Amazon Pay in the merchant's Payment Method Configuration object if it is still behind a feature flag
-* Dev - Clean up LPM (Local Payment Method) feature flags and related code
-* Dev - Move some testing and compiler node dependencies to devDependencies
-* Dev - Minor CSS change to comply with a SASS rule deprecation
-* Dev - Update SCSS to replace @import with @use and @forward
+* Tweak - Update PMC cache expiration time from 10 minutes to 20 minutes
+* Dev - Expands the Stripe Order Helper class to handle source ID, refund ID, intent ID, and setup intent ID metas
+* Dev - Upgrades `jest` to version 29.7.0, `@wordpress/scripts` to 26.19.0, and adds `axios`(version 1.12.2) to the JavaScript development dependencies
+* Dev - Introduces a new helper class to handle Stripe orders
+* Dev - Fixes a warning thrown when running Klarna payment token PHP Unit tests
+* Dev - Fixes some possible warnings shown in the browser console when the Optimized Checkout payment element is instantiated with invalid parameters
+* Dev - Renaming the Klarna payment token class to WC_Stripe_Klarna_Payment_Token
+* Dev - Upgrades Node to v20
+* Dev - Fix live reload issue with Webpack 5
+* Dev - Upgrades the Webpack-related packages
+* Dev - Upgrade the cross-env and rimraf NPM packages; remove chromedriver NPM dependency
+* Dev - Removes three unused NPM script commands: `test`, `test:grep`, and `test:single`
+* Dev - Upgrades the Babel-related packages
+* Dev - Consolidate component used for unavailable payment methods
+* Dev - Update webhook unit tests to be compatible with WooCommerce 10.2
+* Dev - Update the @woocommerce/navigation dependency
+* Dev - Update @wordpress/scripts to 30.24.0 and @wordpress/base-styles to 6.7.0
 
 [See changelog for full details across versions](https://raw.githubusercontent.com/woocommerce/woocommerce-gateway-stripe/trunk/changelog.txt).

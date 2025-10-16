@@ -1,6 +1,7 @@
 <?php
 
 use Automattic\WooCommerce\Enums\ProductType;
+use Automattic\WooCommerce\Enums\ProductTaxStatus;
 
 if ( ! defined( 'ABSPATH' ) ) {
 	exit;
@@ -571,6 +572,31 @@ class WC_Stripe_Express_Checkout_Helper {
 	}
 
 	/**
+	 * Checks whether the subscription product has a free trial.
+	 *
+	 * @return bool
+	 */
+	public function has_free_trial() {
+		if ( $this->is_product() ) {
+			$product = $this->get_product();
+			if ( ! $product ) {
+				return false;
+			}
+			if ( class_exists( 'WC_Subscriptions_Product' )
+				&& WC_Subscriptions_Product::is_subscription( $product )
+				&& WC_Subscriptions_Product::get_trial_length( $product ) > 0 ) {
+				return true;
+			}
+		} elseif ( WC_Stripe_Helper::has_cart_or_checkout_on_current_page() ) {
+			if ( class_exists( 'WC_Subscriptions_Cart' ) && WC_Subscriptions_Cart::cart_contains_free_trial() ) {
+				return true;
+			}
+		}
+
+		return false;
+	}
+
+	/**
 	 * Checks if this is a product page or content contains a product_page shortcode.
 	 *
 	 * @return boolean
@@ -684,10 +710,9 @@ class WC_Stripe_Express_Checkout_Helper {
 			return false;
 		}
 
-		// Don't show in the product page if the product price is 0.
-		// ToDo: support free trials. Free trials should be supported if the product does not require shipping.
-		if ( $is_product && $product && 0.0 === (float) $product->get_price() ) {
-			WC_Stripe_Logger::log( 'Stripe Express Checkout does not support free products.' );
+		// Don't show in the product page if the product price is 0 and the product requires shipping.
+		if ( $is_product && $product && 0.0 === (float) $product->get_price() && $this->product_or_cart_needs_shipping() ) {
+			WC_Stripe_Logger::log( 'Stripe Express Checkout does not support free products that requires shipping.' );
 			return false;
 		}
 
@@ -765,7 +790,7 @@ class WC_Stripe_Express_Checkout_Helper {
 			if ( ! $product ) {
 				return false;
 			}
-			return $product->get_tax_status() !== 'none';
+			return $product->get_tax_status() !== ProductTaxStatus::NONE;
 		}
 
 		// Cart or checkout page: the cart is taxable if any item in the cart
@@ -782,7 +807,7 @@ class WC_Stripe_Express_Checkout_Helper {
 				$cart_item_key
 			);
 
-			if ( 'none' !== $product->get_tax_status() ) {
+			if ( ProductTaxStatus::NONE !== $product->get_tax_status() ) {
 				return true;
 			}
 		}
