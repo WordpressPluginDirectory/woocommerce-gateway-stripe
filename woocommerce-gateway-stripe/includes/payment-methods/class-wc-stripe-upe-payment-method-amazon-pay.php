@@ -1,4 +1,7 @@
 <?php
+
+use Automattic\WooCommerce\Enums\PaymentGatewayFeature;
+
 if ( ! defined( 'ABSPATH' ) ) {
 	exit;
 }
@@ -45,7 +48,7 @@ class WC_Stripe_UPE_Payment_Method_Amazon_Pay extends WC_Stripe_UPE_Payment_Meth
 			'Amazon Pay is a payment method that allows customers to pay with their Amazon account.',
 			'woocommerce-gateway-stripe'
 		);
-		$this->supports[]           = 'tokenization';
+		$this->supports[]           = PaymentGatewayFeature::TOKENIZATION;
 
 		// Check if subscriptions are enabled and add support for them.
 		$this->maybe_init_subscriptions();
@@ -111,11 +114,11 @@ class WC_Stripe_UPE_Payment_Method_Amazon_Pay extends WC_Stripe_UPE_Payment_Meth
 	/**
 	 * Return if Amazon Pay is enabled.
 	 *
-	 * @param WC_Gateway_Stripe $gateway The gateway instance.
+	 * @param WC_Stripe_Payment_Gateway $gateway The gateway instance.
 	 *
 	 * @return bool
 	 */
-	public static function is_amazon_pay_enabled( WC_Gateway_Stripe $gateway ) {
+	public static function is_amazon_pay_enabled( WC_Stripe_Payment_Gateway $gateway ) {
 		// Amazon Pay is disabled if feature flag is disabled.
 		if ( ! WC_Stripe_Feature_Flags::is_amazon_pay_available() ) {
 			return false;
